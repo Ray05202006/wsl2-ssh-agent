@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -263,20 +264,32 @@ static void on_child(int s) {
 }
 
 static posix_spawnattr_t spawn_attr;
-static char *spawn_argv[3];
+static char *spawn_argv[3];  /* helper PIPENAME */
+static char *ready_argv[4];  /* helper --ready PIPENAME: standby helpers */
 
 /* start the helper with fd as its stdin/stdout; returns 0 or an errno */
-static int spawn_helper(int fd, pid_t *pid) {
+static int spawn_argv_helper(char **argv, int fd, pid_t *pid) {
 	posix_spawn_file_actions_t fa;
 	posix_spawn_file_actions_init(&fa);
 	posix_spawn_file_actions_adddup2(&fa, fd, 0);
 	posix_spawn_file_actions_adddup2(&fa, fd, 1);
 	posix_spawn_file_actions_adddup2(&fa, child_err, 2);
-	int e = posix_spawn(pid, spawn_argv[0], &fa, &spawn_attr, spawn_argv, environ);
+	int e = posix_spawn(pid, argv[0], &fa, &spawn_attr, argv, environ);
 	posix_spawn_file_actions_destroy(&fa);
 	if (e == 0) nchild++;
-	else logf_("failed to spawn %s: %s", spawn_argv[0], strerror(e));
+	else logf_("failed to spawn %s: %s", argv[0], strerror(e));
 	return e;
+}
+static int spawn_helper(int fd, pid_t *pid) { return spawn_argv_helper(spawn_argv, fd, pid); }
+
+/* a standby helper on a fresh socketpair; returns our end or -1 */
+static int spawn_standby(pid_t *pid) {
+	int sv[2];
+	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) < 0) return -1;
+	int e = spawn_argv_helper(ready_argv, sv[1], pid);
+	close(sv[1]);
+	if (e) { close(sv[0]); return -1; }
+	return sv[0];
 }
 
 /* ---- -prespawn: one warm standby helper ----
@@ -286,8 +299,20 @@ static int spawn_helper(int fd, pid_t *pid) {
  * ~40 ms WSL interop process start. On connect, a forked relay process copies
  * bytes between the client and the spare (the accept loop itself never
  * blocks on a client), and the next spare is started immediately.
+ *
+ * WSL interop can fail to start a Windows process (/init logs
+ * "UtilAcceptVsock: accept4 failed 110"); the socketpair then just reports
+ * EOF. So standbys run with --ready and write one 0xff byte as soon as the
+ * Windows process is up. Until that byte arrives, a standby is not known to
+ * exist: the relay holds the client's bytes, and if the launch fails it
+ * starts another helper and replays them. Nothing has reached the agent at
+ * that point, so the replay is safe. After the byte, nothing is replayed.
  */
-static int spare_fd = -1;
+#define READY_BYTE 0xff
+#define READY_TRIES 3       /* launches per client before giving up */
+#define READY_MS 10000      /* per launch */
+static int spare_fd = -1, spare_ready;
+static pid_t spare_pid;
 static struct timespec spare_born, respawn_at;
 static long respawn_ms; /* backoff for helpers that die right after start */
 
@@ -307,15 +332,11 @@ static void schedule_respawn(void) {
 }
 
 static void make_spare(void) {
-	int sv[2];
-	pid_t pid;
-	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) < 0) { schedule_respawn(); return; }
-	int e = spawn_helper(sv[1], &pid);
-	close(sv[1]);
-	if (e) { close(sv[0]); schedule_respawn(); return; }
-	spare_fd = sv[0];
+	spare_fd = spawn_standby(&spare_pid);
+	spare_ready = 0;
+	if (spare_fd < 0) { schedule_respawn(); return; }
 	clock_gettime(CLOCK_MONOTONIC, &spare_born);
-	logf_("standby helper started (pid %d)", (int)pid);
+	logf_("standby helper started (pid %d)", (int)spare_pid);
 }
 
 static int write_all(int fd, const char *p, ssize_t n) {
@@ -328,10 +349,50 @@ static int write_all(int fd, const char *p, ssize_t n) {
 	return 0;
 }
 
-/* runs in a forked child: client <-> standby helper until the helper is done */
-static _Noreturn void relay(int client, int h) {
-	static char buf[16384];
-	struct pollfd p[2] = {{client, POLLIN, 0}, {h, POLLIN, 0}};
+/* runs in a forked child: client <-> standby helper until the helper is done.
+ * ready: the daemon already got the helper's ready byte. */
+static _Noreturn void relay(int client, int h, pid_t hpid, int ready) {
+	static char buf[16384], early[16384];
+	size_t elen = 0;
+	int ceof = 0, tries = 1;
+	struct timespec t0;
+	prctl(PR_SET_NAME, "wsa-relay");
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+
+	/* phase 1: wait for the ready byte, holding (not losing) client bytes */
+	while (!ready) {
+		long left = READY_MS - ms_since(&t0);
+		struct pollfd p[2] = {{h, POLLIN, 0}, {ceof || elen == sizeof early ? -1 : client, POLLIN, 0}};
+		int r = left > 0 ? poll(p, 2, (int)left) : 0;
+		if (r < 0) {
+			if (errno == EINTR) continue;
+			_exit(1);
+		}
+		if (p[1].revents) {
+			ssize_t n = read(client, early + elen, sizeof early - elen);
+			if (n < 0 && errno == EINTR) continue;
+			if (n <= 0) ceof = 1;
+			else elen += n;
+		}
+		if (r > 0 && !p[0].revents) continue;
+		unsigned char b = 0;
+		if (r > 0 && read(h, &b, 1) == 1 && b == READY_BYTE) { ready = 1; break; }
+		/* launch failed (EOF), timed out, or bogus byte: try a fresh helper */
+		if (r == 0) kill(hpid, SIGKILL);
+		close(h);
+		if (tries++ >= READY_TRIES) {
+			logf_("helper did not start after %d attempts; dropping the connection", READY_TRIES);
+			_exit(1);
+		}
+		logf_("helper failed to start; retrying (attempt %d of %d)", tries, READY_TRIES);
+		if ((h = spawn_standby(&hpid)) < 0) _exit(1);
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+	}
+	if (write_all(h, early, (ssize_t)elen) < 0) _exit(0);
+	if (ceof) shutdown(h, SHUT_WR);
+
+	/* phase 2: plain byte copy */
+	struct pollfd p[2] = {{ceof ? -1 : client, POLLIN, 0}, {h, POLLIN, 0}};
 	for (;;) {
 		if (poll(p, 2, -1) < 0) {
 			if (errno == EINTR) continue;
@@ -378,6 +439,9 @@ static void serve(int lfd, const char *helper) {
 	posix_spawnattr_setflags(&spawn_attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
 	spawn_argv[0] = (char *)helper;
 	spawn_argv[1] = (char *)opt.pipename;
+	ready_argv[0] = (char *)helper;
+	ready_argv[1] = "--ready";
+	ready_argv[2] = (char *)opt.pipename;
 	int throttle = 0;
 	/* with -prespawn each connection is a relay process + a helper process */
 	int max_children = opt.prespawn ? 2 * MAX_CHILDREN + 1 : MAX_CHILDREN;
@@ -399,12 +463,19 @@ static void serve(int lfd, const char *helper) {
 		throttle = 0;
 
 		if (spare_fd >= 0 && p[1].revents) {
-			/* an idle helper never writes first: readable/HUP means it exited */
-			long age = ms_since(&spare_born);
-			close(spare_fd);
-			spare_fd = -1;
-			if (age < 2000) schedule_respawn();
-			else respawn_ms = 0, make_spare();
+			/* the first byte is the ready byte; after that an idle helper
+			 * never writes, so readable/HUP means it exited (or never started) */
+			unsigned char b = 0;
+			if (!spare_ready && read(spare_fd, &b, 1) == 1 && b == READY_BYTE) {
+				spare_ready = 1;
+			} else {
+				long age = ms_since(&spare_born);
+				if (!spare_ready) logf_("standby helper failed to start");
+				close(spare_fd);
+				spare_fd = -1;
+				if (age < 2000) schedule_respawn();
+				else respawn_ms = 0, make_spare();
+			}
 		} else if (opt.prespawn && spare_fd < 0 && ms_since(&respawn_at) >= 0) {
 			make_spare();
 		}
@@ -446,7 +517,7 @@ static void serve(int lfd, const char *helper) {
 				sigaction(SIGCHLD, &sa, NULL);
 				sigprocmask(SIG_SETMASK, &none, NULL);
 				close(lfd);
-				relay(c, spare_fd);
+				relay(c, spare_fd, spare_pid, spare_ready);
 			}
 			if (pid > 0) {
 				nchild++;

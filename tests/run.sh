@@ -31,7 +31,9 @@ check() { local d=$1; shift; if "$@" >/dev/null 2>&1; then ok "$d"; else ng "$d"
 hex() { od -An -tx1 -v | tr -d ' \n'; }
 cleanup() { "$BIN" -socket "$SOCK" -stop >/dev/null 2>&1; rm -rf "$T"; }
 trap cleanup EXIT
-daemon_pid() { pgrep -f -- "-socket $SOCK" | head -1; }
+# the daemon is the only process holding the listening socket (relays and
+# helpers don't), so ask the kernel instead of matching command lines
+daemon_pid() { local p; p=$(ss -Hxlpn 2>/dev/null | awk -v s="$SOCK" '$5 == s' | grep -o 'pid=[0-9]*' | head -1); [ -n "$p" ] && echo "${p#pid=}" || pgrep -f -- "-socket $SOCK" | head -1; }
 
 # ---- CLI ----
 [[ $("$BIN" -version) == "wsl2-ssh-agent "* ]] && ok "-version" || ng "-version"
@@ -101,10 +103,16 @@ else [ $((rss1 - rss0)) -le 64 ] && ok "no memory growth (RSS $rss0 -> $rss1 kB)
 # ---- stop / stale socket / restart ----
 "$BIN" -socket "$SOCK" -stop >/dev/null 2>&1
 gone "$P" && [ ! -e "$SOCK" ] && ok "-stop terminates daemon and removes socket" || ng "-stop"
-"$BIN" -socket "$SOCK" >/dev/null; P=$(daemon_pid); kill -9 "$P"; sleep 0.2
+"$BIN" -socket "$SOCK" -log "$T/log-stale1" >/dev/null; P=$(daemon_pid); kill -9 "$P"; sleep 0.2
 [ -S "$SOCK" ] || ng "stale socket setup"
-"$BIN" -socket "$SOCK" >/dev/null; P2=$(daemon_pid)
-[ -n "$P2" ] && [ "$P2" != "$P" ] && ssh-add -l >/dev/null && ok "stale socket after SIGKILL is replaced" || ng "stale socket"
+"$BIN" -socket "$SOCK" -log "$T/log-stale2" >/dev/null; P2=$(daemon_pid)
+msg=$(ssh-add -l 2>&1); rc=$?
+if [ -n "$P2" ] && [ "$P2" != "$P" ] && [ $rc = 0 ]; then ok "stale socket after SIGKILL is replaced"
+else
+	ng "stale socket" "P=$P P2=$P2 ssh-add rc=$rc: $msg"
+	ps -o pid,ppid,stat,lstart,args -p "$(pgrep -d, -f -- "-socket $SOCK")" 2>&1 | sed 's/^/    /'
+	sed 's/^/    log1: /' "$T/log-stale1"; sed 's/^/    log2: /' "$T/log-stale2"
+fi
 kill -TERM "$P2"; sleep 0.3
 gone "$P2" && [ ! -e "$SOCK" ] && ok "SIGTERM: clean exit, socket removed" || ng "SIGTERM"
 
@@ -127,6 +135,7 @@ check "daemon survives unavailable agent" kill -0 "$P"
 "$BIN" -socket "$SOCK" -stop >/dev/null
 
 echo
+n=$(cat "$T"/log* 2>/dev/null | grep -c "failed to start"); [ "$n" = 0 ] || echo "note: $n helper launch failure(s) seen in the daemon logs (recovered by retry: $(cat "$T"/log* | grep -c "retrying"))"
 echo "passed: $pass  failed: $fail"
 if [ $fail != 0 ] && [ -s "$T/log" ]; then
 	echo "--- daemon/helper errors from $T/log:"

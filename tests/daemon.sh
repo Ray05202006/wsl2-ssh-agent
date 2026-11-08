@@ -13,14 +13,17 @@ T=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/wsa-dtest.XXXXXX")
 SOCK=$T/s.sock
 mkdir -p build && cc -O2 -o build/sockcat tests/sockcat.c || exit 1
 SC=$PWD/build/sockcat
-printf '#!/bin/sh\necho "helper args: $*" >&2\nexec cat\n' > "$T/echo-helper"; chmod 700 "$T/echo-helper"
+# standbys get --ready and must answer with one 0xff byte once started
+printf '#!/bin/sh\n[ "$1" = --ready ] && { printf "\\377"; shift; }\necho "helper args: $*" >&2\nexec cat\n' > "$T/echo-helper"; chmod 700 "$T/echo-helper"
 A=(-socket "$SOCK" -helper "$T/echo-helper" -log "$T/log")
 pass=0 fail=0
 gone() { [ ! -e /proc/$1 ] || case "$(awk '{print $3}' /proc/$1/stat 2>/dev/null)" in Z|X|"") true;; *) false;; esac; }  # exited: zombie or being reaped
 ok() { echo "ok   - $1"; pass=$((pass+1)); }
 ng() { echo "FAIL - $1${2:+: $2}"; fail=$((fail+1)); }
 trap '"$BIN" -socket "$SOCK" -stop >/dev/null 2>&1; rm -rf "$T"' EXIT
-dpid() { pgrep -f -- "-socket $SOCK" | head -1; }
+# the daemon is the only process holding the listening socket (relays and
+# helpers don't), so ask the kernel instead of matching command lines
+dpid() { local p; p=$(ss -Hxlpn 2>/dev/null | awk -v s="$SOCK" '$5 == s' | grep -o 'pid=[0-9]*' | head -1); [ -n "$p" ] && echo "${p#pid=}" || pgrep -f -- "-socket $SOCK" | head -1; }
 
 [[ $("$BIN" -version) == "wsl2-ssh-agent "* ]] && ok "-version" || ng "-version"
 "$BIN" -bogus >/dev/null 2>&1; [ $? = 2 ] && ok "unknown flag -> exit 2" || ng "unknown flag"
@@ -83,6 +86,33 @@ c0=$(awk '{print $14+$15}' /proc/$P/stat); v0=$(awk '/^voluntary/{print $2}' /pr
 [ "$(awk '/^voluntary/{print $2}' /proc/$P/status)" = "$v0" ] && ok "prespawn: zero wakeups while idle (3 s)" || ng "prespawn idle wakeups"
 "$BIN" -socket "$SOCK" -stop; sleep 0.2
 [ -z "$(pgrep -f "$T/echo-helper")" ] && ok "prespawn: standby exits with the daemon" || ng "standby left behind"
+
+# standby launch that fails before the ready byte (what a WSL interop
+# "accept4 failed 110" looks like): the client must still be served, by a
+# fresh helper that gets the replayed request. $T/fail-once: next --ready
+# launch fails slowly. $T/die-after-ready: helper dies after the ready byte.
+cat > "$T/flaky-helper" <<EOS
+#!/bin/sh
+if [ "\$1" = --ready ]; then
+	if rm "$T/fail-once" 2>/dev/null; then sleep 0.6; exit 1; fi
+	printf '\\377'; shift
+fi
+echo started >> "$T/launches"
+if [ -e "$T/die-after-ready" ]; then head -c 1 >/dev/null; echo got >> "$T/served"; exit 1; fi
+exec cat
+EOS
+chmod 700 "$T/flaky-helper"
+"$BIN" -socket "$SOCK" -helper "$T/flaky-helper" -log "$T/log3" -prespawn >/dev/null; P=$(dpid); sleep 0.3
+touch "$T/fail-once"
+printf a | "$SC" "$SOCK" >/dev/null          # takes the ready standby; the next one will fail
+r=$(printf 'replayed' | "$SC" "$SOCK" 5000)  # gets the standby that is still "starting"
+[ "$r" = replayed ] && grep -q 'retrying (attempt 2' "$T/log3" && ok "prespawn: failed standby launch -> retried, request replayed" || ng "launch retry" "r=$r $(cat "$T/log3")"
+sleep 0.3; touch "$T/die-after-ready"; : > "$T/served"
+kill $(cat /proc/$P/task/*/children); sleep 0.5  # replacement standby sees the flag
+r=$(printf 'abc' | "$SC" "$SOCK" 5000); sleep 0.3
+[ -z "$r" ] && [ "$(wc -l < "$T/served")" = 1 ] && ok "prespawn: no replay once the helper was ready" || ng "no replay" "r=$r served=$(wc -l < "$T/served")"
+rm -f "$T/die-after-ready"
+"$BIN" -socket "$SOCK" -stop
 
 # a helper that dies immediately must not make the daemon spin
 printf '#!/bin/sh\nexit 1\n' > "$T/dead-helper"; chmod 700 "$T/dead-helper"

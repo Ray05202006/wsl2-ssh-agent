@@ -9,6 +9,7 @@
  *     FAKE_AGENT=missing  CreateFileW fails with ERROR_FILE_NOT_FOUND
  *     FAKE_AGENT=busy     CreateFileW fails with ERROR_PIPE_BUSY
  *   FAKE_OLD_AGENT=1 makes the version check report OpenSSH 8.1.
+ *   FAKE_READY=1 runs the helper as a standby (`helper.exe --ready`).
  */
 #pragma once
 #include <stdint.h>
@@ -71,7 +72,7 @@ static void shim_init(void) {
 static HANDLE GetStdHandle(DWORD n) { return (HANDLE)(intptr_t)n; }
 static DWORD GetLastError(void) { return shim_err; }
 static void ExitProcess(UINT c) { exit((int)c); }
-static const WCHAR *GetCommandLineW(void) { return L"helper.exe"; }
+static const WCHAR *GetCommandLineW(void) { return getenv("FAKE_READY") ? L"helper.exe --ready" : L"helper.exe"; }
 static ULONGLONG GetTickCount64(void) { return shim_ticks += 50; } /* virtual clock */
 static void Sleep(DWORD ms) { shim_ticks += ms; }
 static BOOL WaitNamedPipeW(LPCWSTR n, DWORD t) { (void)n; shim_ticks += t / 8 + 1; return TRUE; }

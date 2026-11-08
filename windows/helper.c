@@ -3,7 +3,11 @@
  * stdin/stdout (connected by WSL interop to a UNIX socket client) and a
  * Windows named pipe (default \\.\pipe\openssh-ssh-agent).
  *
- *   wsl2-ssh-agent-helper.exe [PIPENAME]
+ *   wsl2-ssh-agent-helper.exe [--ready] [PIPENAME]
+ *
+ *   --ready  write one 0xff byte to stdout as soon as the process runs
+ *            (used by the daemon's -prespawn to tell a running standby from
+ *            one whose WSL interop launch failed)
  *
  * One process per client connection (started on connect, or ahead of time
  * with the daemon's -prespawn): the process lives exactly as long as
@@ -160,6 +164,12 @@ void __stdcall start(void) {
 		while (*cl && *cl != L' ' && *cl != L'\t') cl++;
 	}
 	while (*cl == L' ' || *cl == L'\t') cl++;
+	if (cl[0] == L'-' && cl[1] == L'-' && cl[2] == L'r' && cl[3] == L'e' && cl[4] == L'a' && cl[5] == L'd' &&
+	    cl[6] == L'y' && (cl[7] == 0 || cl[7] == L' ' || cl[7] == L'\t')) {
+		static const unsigned char ready = 0xff;
+		if (!wr(out, &ready, 1)) ExitProcess(0);
+		for (cl += 7; *cl == L' ' || *cl == L'\t'; cl++);
+	}
 	if (*cl == L'"') cl++;
 	if (!*cl) cl = L"openssh-ssh-agent";
 	while (*cl && *cl != L'"' && i < 299) name[i++] = *cl++;

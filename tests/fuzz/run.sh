@@ -14,8 +14,11 @@ for i in $(seq "$N"); do
 	old=$((i % 3 == 0))
 	"$T/gen" "$i" "$T/in" "$T/exp" "$T/rep" $old
 	# 1. echo agent: output must be exactly the expected frames
+	#    (every 4th seed as a --ready standby: one 0xff byte first)
+	if [ $((i % 4)) = 0 ]; then { printf '\377'; cat "$T/exp"; } > "$T/exp2"; mv "$T/exp2" "$T/exp"; export FAKE_READY=1; else unset FAKE_READY; fi
 	if [ $old = 1 ]; then FAKE_OLD_AGENT=1 FAKE_AGENT=echo "$T/helper" < "$T/in" > "$T/out" 2>"$T/err"; rc=$?
 	else FAKE_AGENT=echo "$T/helper" < "$T/in" > "$T/out" 2>"$T/err"; rc=$?; fi
+	unset FAKE_READY
 	runs=$((runs+1))
 	case $rc in 0|4) ;; *) echo "seed $i echo: rc=$rc"; head -5 "$T/err"; bad=$((bad+1));; esac
 	cmp -s "$T/out" "$T/exp" || { echo "seed $i echo: output mismatch ($(stat -c %s "$T/out") vs $(stat -c %s "$T/exp") B)"; bad=$((bad+1)); }
