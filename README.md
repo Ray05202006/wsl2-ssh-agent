@@ -3,18 +3,50 @@
 This tool lets WSL2 use the ssh-agent service on the Windows host
 (Windows OpenSSH `ssh-agent.exe`, or any agent on a named pipe such as pageant).
 
-This is a low-resource re-implementation: a small C daemon in WSL2 plus a
-~6 KB native Windows helper that is started only while a client is connected.
-Nothing stays resident on the Windows side, and the daemon makes no
-wakeups while idle. See [DESIGN.md](DESIGN.md) for the analysis, the alternatives
-that were measured, and the benchmarks.
+This is a low-resource re-implementation of
+[mame/wsl2-ssh-agent](https://github.com/mame/wsl2-ssh-agent) by Yusuke Endoh
+(MIT license, kept in [LICENSE](LICENSE)): a small C daemon in WSL2 plus a
+~6.5 KB native Windows helper that is started only while a client is
+connected. Nothing stays resident on the Windows side, and the daemon makes no
+wakeups while idle. Command-line flags and shell integration are compatible
+with the original. See [DESIGN.md](DESIGN.md) for the analysis, the
+alternatives that were measured, and the benchmarks.
 
 ## How to use
 
-### 1. Build and install
-
 Requirements: WSL2 with Windows interop enabled (the default), and the
 "OpenSSH Authentication Agent" service running on Windows.
+
+### 1. Install
+
+#### Option A: download a release
+
+The binary is a single file; the Windows helper is embedded in it.
+
+```sh
+cd ~
+# x86-64
+curl -LO https://github.com/Ray05202006/wsl2-ssh-agent/releases/latest/download/wsl2-ssh-agent
+# ARM64 (see the note below)
+curl -LO https://github.com/Ray05202006/wsl2-ssh-agent/releases/latest/download/wsl2-ssh-agent-arm64
+
+# verify (prints "OK" for each file you downloaded)
+curl -LO https://github.com/Ray05202006/wsl2-ssh-agent/releases/latest/download/checksums.txt
+sha256sum -c --ignore-missing checksums.txt
+
+chmod 755 wsl2-ssh-agent*
+```
+
+The examples below assume `/usr/bin/wsl2-ssh-agent`; use `$HOME/wsl2-ssh-agent`
+instead if you keep it in your home directory (or `sudo install -m 755
+wsl2-ssh-agent /usr/bin/`). On ARM64, rename `wsl2-ssh-agent-arm64` to
+`wsl2-ssh-agent` or use that name below.
+
+**ARM64 note:** only the Linux side is built for ARM64. The embedded Windows
+helper is x86-64 and relies on Windows on ARM's x64 emulation. The ARM64
+build is compiled in CI but has **not been tested on ARM hardware yet**.
+
+#### Option B: build from source
 
 ```sh
 # Arch Linux (WSL2)
@@ -28,8 +60,9 @@ Tools) installed on the Windows host, `make` builds the helper with the
 host's MSVC through WSL interop (`windows/msvc.sh`). You can also build the
 helper anywhere else and pass `make HELPER_EXE=/path/to/wsl2-ssh-agent-helper.exe`.
 
-The Windows helper is embedded in the Linux binary, so `wsl2-ssh-agent` is still
-a single file to deploy. On start, it writes the helper to
+#### Where the helper goes
+
+On start, the daemon writes the embedded helper to
 `$XDG_RUNTIME_DIR/wsl2-ssh-agent/` (or `~/.cache/wsl2-ssh-agent/`). The file is
 mode 0700, sits in an owner-only directory, and is rewritten only if its
 content differs. Nothing is installed on the Windows side.
