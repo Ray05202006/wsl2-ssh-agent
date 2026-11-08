@@ -401,7 +401,28 @@ Go's sysmon parks when idle.
   (both modes). A standby may wait for hours, and it must not be holding a
   pipe connection that went stale because `ssh-agent.exe` restarted in the
   meantime.
-* An idle helper never writes first, so a readable or hung-up standby
+* **Launch handshake.** WSL interop occasionally fails to start a Windows
+  process at all: `/init` logs `UtilAcceptVsock:281: accept4 failed 110`
+  (ETIMEDOUT) to the helper's stderr and the socketpair just reports EOF.
+  In the default mode that ends only the one connection the helper was
+  started for. A standby, though, is started *before* its client, so before
+  this fix the client that got a never-started standby was dropped
+  (`ssh-add` saw EOF). This was the intermittent `PRESPAWN=1 tests/run.sh`
+  failure ("stale socket", once "300 sequential connections"); the daemon
+  log of the failing run held that `/init` line.
+  So standbys are started as `helper.exe --ready PIPENAME` and write one
+  `0xff` byte as soon as the Windows process runs, before touching the pipe.
+  The daemon reads that byte; until it arrives the standby only *might*
+  exist. A client that gets a standby which is not ready yet is handled by
+  the relay: it holds the client's bytes (up to 16 KB, then it stops
+  reading, so nothing is lost), and if the helper exits, times out (10 s) or
+  sends anything but `0xff`, it starts a fresh `--ready` helper and replays
+  them, up to 3 launches. Replay is safe because nothing can have reached
+  the agent before the ready byte. After the ready byte nothing is replayed:
+  a helper that dies mid-request ends that connection, as in the default
+  mode. The relay names itself `wsa-relay` (`prctl`), so it is not mistaken
+  for the daemon in `ps`/`top`.
+* An idle, ready helper never writes again, so a readable or hung-up standby
   socket means the helper exited. If it died within 2 s of starting, the
   restart is delayed (100 ms, doubling, capped at 60 s); this is the only
   timer in the daemon, and only while a restart is pending. Meanwhile, and on
@@ -450,6 +471,15 @@ Reading the numbers:
   (+35 µs for the relay hop), and bursts faster than the ~40 ms standby
   restart (see §8).
 
+**Size cost of the launch handshake** (added after the measurements
+above): the helper is 6,656 B (+512 B, one PE file-alignment unit, for the
+`--ready` parsing) and the Linux binary 35,024 B (+4,096 B). The new code
+itself is about 1.4 KB (.text +735 B, .rodata +691 B incl. the helper), but
+.text crossed a 4 KB page boundary. Linking with `-z noseparate-code` would
+get back to 30,928 B, but it maps .rodata, including the embedded helper
+bytes, executable together with the code, so it is not used. The latency and
+memory numbers are unaffected: the daemon reads one extra byte per standby.
+
 **Recommendation:** keep per-connection as the default (lowest footprint,
 matching the stated priorities), and use `-prespawn` if you open many short
 SSH connections interactively (git over SSH, `ssh` in loops) and the
@@ -457,14 +487,25 @@ SSH connections interactively (git over SSH, `ssh` in loops) and the
 
 ### Tests
 
-`tests/daemon.sh` has 11 `-prespawn` cases with a stand-in helper: one
+`tests/daemon.sh` has 13 `-prespawn` cases with a stand-in helper: one
 standby while idle; half-close relayed; a 200 KB round trip; 32 concurrent
 clients; exactly one standby left after 200 connections; a killed standby
 is replaced and the next connection is served; zero idle wakeups; the
-standby exits with the daemon; a helper that dies immediately backs off
-(16 context switches in 3 s, no spin); and the fallback to the direct path
-with no hang. `PRESPAWN=1 tests/run.sh` runs the whole 37-test end-to-end
-suite with `-prespawn`, and it passes.
+standby exits with the daemon; a standby whose launch fails before the
+ready byte is retried and the client's request replayed; no replay once the
+helper was ready; a helper that dies immediately backs off (16 context
+switches in 3 s, no spin); and the fallback to the direct path with no hang.
+`PRESPAWN=1 tests/run.sh` runs the whole 37-test end-to-end suite with
+`-prespawn` and reports any launch failures seen in the daemon logs.
+
+The tests now find the daemon's PID with `ss -xlp` (the only process holding
+the listening socket) instead of `pgrep -f`, because relay processes are
+forks of the daemon and share its command line.
+
+After the fix, `PRESPAWN=1 tests/run.sh` passed 20 times in a row (740/740
+tests; before it, one run in about 20 failed). None of those 20 runs hit an
+interop launch failure, so on the real system the retry path was not
+exercised; it is covered by the stand-in helper cases above.
 
 ## 10. Memory-safety verification
 
@@ -472,12 +513,13 @@ Checked after a code review of both C files:
 
 | Check | Daemon (`src/`) | Helper (`windows/`) |
 |---|---|---|
-| Review findings fixed | `SO_PEERCRED` failure no longer logs an uninitialised uid; `stat()` of the new socket is checked; paths built from `HOME`/`XDG_RUNTIME_DIR` now fail instead of being silently truncated (`pathf`) | — |
-| ASan + UBSan (`make sanitize`) | `tests/daemon.sh` 34/34, `tests/run.sh` 37/37, `PRESPAWN=1 tests/run.sh` 37/37; **no sanitizer reports**; LeakSanitizer clean at every daemon exit | — |
-| Randomized framing tests (`make fuzz`) | — | helper.c built on Linux against a Win32 shim (`tests/fuzz/`), ASan + UBSan, **40,002 runs, 0 problems**. Echo agent: output must equal the exactly expected frames. Hostile agent: random and malformed replies. Missing and permanently busy pipe must give up, on a virtual clock. |
+| Review findings fixed | `SO_PEERCRED` failure no longer logs an uninitialised uid; `stat()` of the new socket is checked; paths built from `HOME`/`XDG_RUNTIME_DIR` now fail instead of being silently truncated (`pathf`); signal handlers are installed before `listen()` (previously a SIGTERM or `-stop` right after the start snippet was printed could kill the daemon with the default action and leave a stale socket) | — |
+| ASan + UBSan (`make sanitize`) | `tests/daemon.sh` 36/36, `tests/run.sh` 37/37, `PRESPAWN=1 tests/run.sh` 37/37; **no sanitizer reports**; LeakSanitizer clean at every daemon exit | — |
+| Randomized framing tests (`make fuzz`) | — | helper.c built on Linux against a Win32 shim (`tests/fuzz/`), ASan + UBSan, **40,002 runs, 0 problems**. Echo agent: output must equal the exactly expected frames (every 4th seed runs as a `--ready` standby and must emit `0xff` first). Hostile agent: random and malformed replies. Missing and permanently busy pipe must give up, on a virtual clock. |
 | Harness sensitivity | — | Planted bugs are caught: length check `> MAX_MSG + 16` gives 43 overflow reports, and `> MAX_MSG + 1` (off-by-one) gives 12, in 1,200 runs |
 | Static analysis (`make analyze`) | `gcc -fanalyzer`, **0 warnings** (`-Werror`) | **unverified**: gcc 16.2.1's analyzer hits an internal compiler error on helper.c (at -O0 and -O1); MSVC `/analyze` not run |
-| valgrind, cppcheck | not installed (installing needs sudo); **not run** | — |
+| valgrind 3.25.1 memcheck (`make valgrind`) | `tests/daemon.sh` 36/36 on a `-O1 -g` build under valgrind, every forked process traced (855 daemon/relay processes): **0 errors**, no definite/indirect leaks. `--track-fds=yes` is not used because it counts fds still open at exit (stdio, log) as errors; fd leaks are covered by the fd-count test. | Same generator/oracle as the fuzzer, without ASan: **600 runs, 0 errors** (uninitialised reads included) |
+| cppcheck 2.22.0 (`warning,style,performance,portability`) | **0 findings** (daemon, sockcat, agentbench). Fixed on the way: the helper's size symbol is now emitted by the assembler instead of subtracting two unrelated pointers; unchecked `malloc`/`fopen` in test and bench tools. | **0 findings** through the shim; one `knownConditionTrueFalse` suppressed, caused by the shim's constant stubs |
 
 * **RSS under ASan.** With the sanitizer, the daemon's RSS rises about
   280–420 bytes per connection, with or without the quarantine. The shipped

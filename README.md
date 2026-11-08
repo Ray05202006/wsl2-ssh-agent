@@ -130,6 +130,7 @@ Errors from the Windows helper are prefixed with `[W]`, for example
 ```
 make test-daemon   # Linux-side tests with a stand-in helper (runs anywhere)
 make test          # end-to-end tests against the real Windows agent (WSL2 only)
+make sanitize fuzz valgrind analyze   # memory-safety checks (see DESIGN.md §10)
 ```
 
 ## How It Works
