@@ -1,0 +1,19 @@
+# rust-daemon  2026-11-08T22:52:47+08:00
+# cmd: /run/user/1000/wsa/rust-daemon {SOCK} /run/user/1000/wsl2-ssh-agent/wsl2-ssh-agent-helper.exe
+startup_to_first_reply_ms=69
+## idle (5 s after first request)
+linux pid=637824 comm=rust-daemon rss_kb=2148 pss_kb=348 pss_anon_kb=132 hwm_kb=2148 threads=1 cpu_ticks=0 ctxsw=5
+linux total rss_kb=2148 pss_kb=348
+## workloads
+op=list n=500 conc=1 fails=0 wall_ms=126.2 min=108 p50=137 p95=200 p99=250 max=52433 (us)
+op=sign n=300 conc=1 fails=0 wall_ms=269.6 min=612 p50=730 p95=849 p99=1105 max=48291 (us)
+op=conn n=100 conc=1 fails=0 wall_ms=4891.5 min=44497 p50=48581 p95=52611 p99=56670 max=59142 (us)
+op=conn n=160 conc=8 fails=0 wall_ms=1348.9 min=44468 p50=64380 p95=83202 p99=86979 max=89992 (us)
+op=sign n=400 conc=8 fails=0 wall_ms=171.4 min=773 p50=993 p95=1407 p99=114710 max=121006 (us)
+tool="ssh-add -l" n=30 fails=0 avg_ms=57
+tool="ssh-keygen -Y sign" n=30 fails=0 avg_ms=55
+## after workloads
+linux pid=637824 comm=rust-daemon rss_kb=2148 pss_kb=344 pss_anon_kb=132 hwm_kb=2148 threads=1 cpu_ticks=3 ctxsw=655
+linux total rss_kb=2148 pss_kb=344
+## idle 30s: linux_cpu_ticks=0 linux_ctxsw=0 win_cpu_ms=0 (the win figure includes WMI query noise only if the process is resident)
+# done

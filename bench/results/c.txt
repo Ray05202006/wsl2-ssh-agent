@@ -1,0 +1,19 @@
+# c  2026-11-08T23:17:03+08:00
+# cmd: ./wsl2-ssh-agent -foreground -socket {SOCK}
+startup_to_first_reply_ms=55
+## idle (5 s after first request)
+linux pid=757784 comm=wsl2-ssh-agent rss_kb=1828 pss_kb=188 pss_anon_kb=128 hwm_kb=1828 threads=1 cpu_ticks=0 ctxsw=6
+linux total rss_kb=1828 pss_kb=188
+## workloads
+op=list n=500 conc=1 fails=0 wall_ms=133.0 min=106 p50=141 p95=195 p99=263 max=59346 (us)
+op=sign n=300 conc=1 fails=0 wall_ms=265.2 min=602 p50=707 p95=861 p99=1012 max=48079 (us)
+op=conn n=100 conc=1 fails=0 wall_ms=5076.5 min=45010 p50=48872 p95=54433 p99=60273 max=189543 (us)
+op=conn n=160 conc=8 fails=0 wall_ms=1344.1 min=43686 p50=59518 p95=77914 p99=98730 max=102863 (us)
+op=sign n=400 conc=8 fails=0 wall_ms=143.2 min=676 p50=910 p95=1164 p99=90218 max=95468 (us)
+tool="ssh-add -l" n=30 fails=0 avg_ms=60
+tool="ssh-keygen -Y sign" n=30 fails=0 avg_ms=58
+## after workloads
+linux pid=757784 comm=wsl2-ssh-agent rss_kb=1828 pss_kb=183 pss_anon_kb=128 hwm_kb=1892 threads=1 cpu_ticks=4 ctxsw=960
+linux total rss_kb=1828 pss_kb=183
+## idle 60s: linux_cpu_ticks=0 linux_ctxsw=0 win_cpu_ms=0 (the win figure includes WMI query noise only if the process is resident)
+# done

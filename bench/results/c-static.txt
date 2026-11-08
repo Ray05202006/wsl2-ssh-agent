@@ -1,0 +1,19 @@
+# c-static  2026-11-08T22:51:11+08:00
+# cmd: /run/user/1000/wsa/c-static -foreground -socket {SOCK}
+startup_to_first_reply_ms=54
+## idle (5 s after first request)
+linux pid=629191 comm=c-static rss_kb=924 pss_kb=920 pss_anon_kb=84 hwm_kb=924 threads=1 cpu_ticks=0 ctxsw=6
+linux total rss_kb=924 pss_kb=920
+## workloads
+op=list n=500 conc=1 fails=0 wall_ms=134.9 min=121 p50=150 p95=196 p99=257 max=55157 (us)
+op=sign n=300 conc=1 fails=0 wall_ms=269.7 min=584 p50=727 p95=888 p99=1008 max=48354 (us)
+op=conn n=100 conc=1 fails=0 wall_ms=5032.8 min=45244 p50=49874 p95=54249 p99=55610 max=58333 (us)
+op=conn n=160 conc=8 fails=0 wall_ms=1309.7 min=41956 p50=61331 p95=78325 p99=103000 max=105416 (us)
+op=sign n=400 conc=8 fails=0 wall_ms=148.6 min=680 p50=902 p95=1239 p99=96798 max=101921 (us)
+tool="ssh-add -l" n=30 fails=0 avg_ms=59
+tool="ssh-keygen -Y sign" n=30 fails=0 avg_ms=57
+## after workloads
+linux pid=629191 comm=c-static rss_kb=924 pss_kb=920 pss_anon_kb=84 hwm_kb=924 threads=1 cpu_ticks=4 ctxsw=963
+linux total rss_kb=924 pss_kb=920
+## idle 30s: linux_cpu_ticks=0 linux_ctxsw=0 win_cpu_ms=0 (the win figure includes WMI query noise only if the process is resident)
+# done

@@ -1,0 +1,23 @@
+# c-prespawn  2026-11-08T23:18:21+08:00
+# cmd: ./wsl2-ssh-agent -foreground -prespawn -socket {SOCK}
+startup_to_first_reply_ms=61
+## idle (5 s after first request)
+linux pid=762439 comm=wsl2-ssh-agent rss_kb=1808 pss_kb=188 pss_anon_kb=128 hwm_kb=1808 threads=1 cpu_ticks=0 ctxsw=8
+linux pid=762443 comm=wsl2-ssh-agent- rss_kb=2424 pss_kb=308 pss_anon_kb=124 hwm_kb=2424 threads=1 cpu_ticks=0 ctxsw=8
+linux total rss_kb=4232 pss_kb=496
+win name=wsl2-ssh-agent-helper.exe pid=4912 ws_kb=3296 privws_kb=280 private_kb=720 peak_ws_kb=3296 threads=1 handles=44 cpu_ms=16
+## workloads
+op=list n=500 conc=1 fails=0 wall_ms=100.2 min=132 p50=176 p95=235 p99=319 max=8650 (us)
+op=sign n=300 conc=1 fails=0 wall_ms=249.9 min=628 p50=742 p95=875 p99=953 max=25035 (us)
+op=conn n=100 conc=1 fails=0 wall_ms=1783.7 min=7745 p50=18595 p95=27832 p99=52987 max=55402 (us)
+op=conn n=160 conc=8 fails=0 wall_ms=1185.0 min=10314 p50=60684 p95=74257 p99=77659 max=82211 (us)
+op=sign n=400 conc=8 fails=0 wall_ms=142.9 min=732 p50=944 p95=1236 p99=86773 max=92819 (us)
+tool="ssh-add -l" n=30 fails=0 avg_ms=22
+tool="ssh-keygen -Y sign" n=30 fails=0 avg_ms=23
+## after workloads
+linux pid=762439 comm=wsl2-ssh-agent rss_kb=1808 pss_kb=182 pss_anon_kb=128 hwm_kb=1872 threads=1 cpu_ticks=9 ctxsw=1209
+linux pid=763828 comm=wsl2-ssh-agent- rss_kb=2420 pss_kb=304 pss_anon_kb=120 hwm_kb=2420 threads=1 cpu_ticks=0 ctxsw=8
+linux total rss_kb=4228 pss_kb=486
+win name=wsl2-ssh-agent-helper.exe pid=1816 ws_kb=3296 privws_kb=280 private_kb=728 peak_ws_kb=3296 threads=1 handles=44 cpu_ms=0
+## idle 60s: linux_cpu_ticks=0 linux_ctxsw=0 win_cpu_ms=0 (the win figure includes WMI query noise only if the process is resident)
+# done

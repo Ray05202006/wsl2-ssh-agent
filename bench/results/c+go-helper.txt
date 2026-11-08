@@ -1,0 +1,19 @@
+# c+go-helper  2026-11-08T22:53:35+08:00
+# cmd: ./wsl2-ssh-agent -foreground -helper /run/user/1000/wsa/go-helper.exe -socket {SOCK}
+startup_to_first_reply_ms=167
+## idle (5 s after first request)
+linux pid=641371 comm=wsl2-ssh-agent rss_kb=1804 pss_kb=163 pss_anon_kb=108 hwm_kb=1804 threads=1 cpu_ticks=0 ctxsw=6
+linux total rss_kb=1804 pss_kb=163
+## workloads
+op=list n=500 conc=1 fails=0 wall_ms=218.6 min=112 p50=138 p95=191 p99=246 max=145373 (us)
+op=sign n=300 conc=1 fails=0 wall_ms=357.4 min=605 p50=712 p95=804 p99=914 max=142197 (us)
+op=conn n=100 conc=1 fails=0 wall_ms=14936.0 min=140508 p50=147783 p95=162285 p99=174719 max=176857 (us)
+op=conn n=160 conc=8 fails=64 wall_ms=1402.6 min=39664 p50=55884 p95=182141 p99=186593 max=192329 (us)
+op=sign n=400 conc=8 fails=6 wall_ms=333.5 min=627 p50=855 p95=1272 p99=188868 max=194533 (us)
+tool="ssh-add -l" n=30 fails=0 avg_ms=154
+tool="ssh-keygen -Y sign" n=30 fails=0 avg_ms=159
+## after workloads
+linux pid=641371 comm=wsl2-ssh-agent rss_kb=1804 pss_kb=158 pss_anon_kb=108 hwm_kb=1952 threads=1 cpu_ticks=4 ctxsw=931
+linux total rss_kb=1804 pss_kb=158
+## idle 30s: linux_cpu_ticks=0 linux_ctxsw=0 win_cpu_ms=0 (the win figure includes WMI query noise only if the process is resident)
+# done

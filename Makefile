@@ -40,6 +40,9 @@ wsl2-ssh-agent: src/wsl2-ssh-agent.c $(HELPER_EXE)
 	$(CC) $(CFLAGS) $(WARN) $(HARDEN) $(SIZE) -DVERSION='"$(VERSION)"' \
 	  -DHELPER_EXE='"$(abspath $(HELPER_EXE))"' -o $@ $< $(LDFLAGS)
 
+build/agentbench: bench/agentbench.c | build
+	$(CC) -O2 -pthread -o $@ $<
+
 install: wsl2-ssh-agent
 	install -Dm755 wsl2-ssh-agent $(DESTDIR)$(PREFIX)/bin/wsl2-ssh-agent
 	install -Dm644 extras/systemd/user/wsl2-ssh-agent.service \

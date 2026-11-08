@@ -1,0 +1,14 @@
+== start
+linux pid=667626 comm=orig rss_kb=3764 pss_kb=3756 pss_anon_kb=1240 hwm_kb=3764 threads=8 cpu_ticks=0 ctxsw=60
+linux pid=667650 comm=powershell.exe rss_kb=2432 pss_kb=316 pss_anon_kb=132 hwm_kb=2432 threads=1 cpu_ticks=0 ctxsw=86
+linux total rss_kb=6196 pss_kb=4072
+linux pid=667627 comm=wsl2-ssh-agent rss_kb=1828 pss_kb=190 pss_anon_kb=128 hwm_kb=1828 threads=1 cpu_ticks=0 ctxsw=6
+linux total rss_kb=1828 pss_kb=190
+win name=powershell.exe pid=25552 ws_kb=94476 privws_kb=40224 private_kb=74444 peak_ws_kb=94604 threads=25 handles=1075 cpu_ms=406
+== end (+600 s)
+linux pid=667626 comm=orig rss_kb=1264 pss_kb=1256 pss_anon_kb=1168 hwm_kb=3276 threads=8 cpu_ticks=0 ctxsw=60
+linux pid=667650 comm=powershell.exe rss_kb=2428 pss_kb=312 pss_anon_kb=128 hwm_kb=2428 threads=1 cpu_ticks=0 ctxsw=86
+linux total rss_kb=3692 pss_kb=1568
+linux pid=667627 comm=wsl2-ssh-agent rss_kb=1800 pss_kb=160 pss_anon_kb=120 hwm_kb=1800 threads=1 cpu_ticks=0 ctxsw=6
+linux total rss_kb=1800 pss_kb=160
+win name=powershell.exe pid=25552 ws_kb=93848 privws_kb=39784 private_kb=73644 peak_ws_kb=94604 threads=10 handles=1040 cpu_ms=422

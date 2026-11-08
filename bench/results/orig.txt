@@ -1,0 +1,23 @@
+# orig  2026-11-08T22:49:27+08:00
+# cmd: ./orig -foreground -socket {SOCK}
+startup_to_first_reply_ms=440
+## idle (5 s after first request)
+linux pid=620957 comm=orig rss_kb=3844 pss_kb=3836 pss_anon_kb=1320 hwm_kb=3844 threads=8 cpu_ticks=0 ctxsw=58
+linux pid=620969 comm=powershell.exe rss_kb=2428 pss_kb=312 pss_anon_kb=128 hwm_kb=2428 threads=1 cpu_ticks=0 ctxsw=82
+linux total rss_kb=6272 pss_kb=4148
+win name=powershell.exe pid=28456 ws_kb=94492 privws_kb=40184 private_kb=74480 peak_ws_kb=94612 threads=27 handles=1085 cpu_ms=516
+## workloads
+op=list n=500 conc=1 fails=0 wall_ms=5254.3 min=8252 p50=10355 p95=12421 p99=13841 max=25756 (us)
+op=sign n=300 conc=1 fails=0 wall_ms=3702.6 min=8865 p50=12304 p95=15014 p99=15512 max=16577 (us)
+op=conn n=100 conc=1 fails=0 wall_ms=863.7 min=7539 p50=8483 p95=9942 p99=10302 max=11419 (us)
+op=conn n=160 conc=8 fails=0 wall_ms=1413.0 min=9001 p50=70400 p95=75449 p99=76309 max=76555 (us)
+op=sign n=400 conc=8 fails=0 wall_ms=4035.8 min=11229 p50=80178 p95=86608 p99=88714 max=89729 (us)
+tool="ssh-add -l" n=30 fails=0 avg_ms=13
+tool="ssh-keygen -Y sign" n=30 fails=0 avg_ms=24
+## after workloads
+linux pid=620957 comm=orig rss_kb=4816 pss_kb=4808 pss_anon_kb=2292 hwm_kb=4816 threads=9 cpu_ticks=59 ctxsw=58
+linux pid=620969 comm=powershell.exe rss_kb=2428 pss_kb=312 pss_anon_kb=128 hwm_kb=2428 threads=1 cpu_ticks=23 ctxsw=8768
+linux total rss_kb=7244 pss_kb=5120
+win name=powershell.exe pid=28456 ws_kb=91516 privws_kb=36924 private_kb=70840 peak_ws_kb=119816 threads=27 handles=626 cpu_ms=4891
+## idle 30s: linux_cpu_ticks=0 linux_ctxsw=0 win_cpu_ms=656 (the win figure includes WMI query noise only if the process is resident)
+# done

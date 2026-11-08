@@ -1,0 +1,19 @@
+# c+rust-helper  2026-11-08T22:54:39+08:00
+# cmd: ./wsl2-ssh-agent -foreground -helper /run/user/1000/wsa/rust-helper.exe -socket {SOCK}
+startup_to_first_reply_ms=67
+## idle (5 s after first request)
+linux pid=661207 comm=wsl2-ssh-agent rss_kb=1812 pss_kb=171 pss_anon_kb=112 hwm_kb=1812 threads=1 cpu_ticks=0 ctxsw=6
+linux total rss_kb=1812 pss_kb=171
+## workloads
+op=list n=500 conc=1 fails=0 wall_ms=134.0 min=120 p50=149 p95=203 p99=252 max=56249 (us)
+op=sign n=300 conc=1 fails=0 wall_ms=278.3 min=609 p50=727 p95=862 p99=1161 max=57299 (us)
+op=conn n=100 conc=1 fails=0 wall_ms=5899.7 min=52274 p50=57627 p95=64362 p99=84403 max=89850 (us)
+op=conn n=160 conc=8 fails=61 wall_ms=1249.2 min=37098 p50=58411 p95=79592 p99=86254 max=93155 (us)
+op=sign n=400 conc=8 fails=9 wall_ms=288.1 min=638 p50=842 p95=1481 p99=102920 max=113435 (us)
+tool="ssh-add -l" n=30 fails=0 avg_ms=67
+tool="ssh-keygen -Y sign" n=30 fails=0 avg_ms=64
+## after workloads
+linux pid=661207 comm=wsl2-ssh-agent rss_kb=1812 pss_kb=165 pss_anon_kb=112 hwm_kb=1812 threads=1 cpu_ticks=4 ctxsw=935
+linux total rss_kb=1812 pss_kb=165
+## idle 30s: linux_cpu_ticks=0 linux_ctxsw=0 win_cpu_ms=0 (the win figure includes WMI query noise only if the process is resident)
+# done
