@@ -45,7 +45,7 @@ extern const char helper_exe[], helper_exe_end[];
 
 static struct {
 	const char *socket, *helper, *pipename, *log, *format;
-	int foreground, verbose, stop, version;
+	int foreground, verbose, stop, version, prespawn;
 } opt = {.pipename = "openssh-ssh-agent", .format = "auto"};
 
 static int log_fd = -1;     /* -1 = logging disabled */
@@ -85,6 +85,8 @@ static void usage(FILE *f) {
 	      "  -socket PATH     UNIX domain socket to listen on (default ~/.ssh/wsl2-ssh-agent.sock)\n"
 	      "  -pipename NAME   Windows named pipe to connect to (default openssh-ssh-agent)\n"
 	      "  -helper PATH     use this wsl2-ssh-agent-helper.exe instead of the embedded one\n"
+	      "  -prespawn        keep one helper started ahead of time (lower connection\n"
+	      "                   latency, ~1 MB resident on Windows; see DESIGN.md)\n"
 	      "  -foreground      run in foreground mode\n"
 	      "  -verbose         verbose mode\n"
 	      "  -log FILE        append the log to FILE\n"
@@ -101,6 +103,7 @@ static void parse_args(int argc, char **argv) {
 		{"format", &opt.format, 0},       {"powershell-path", 0, 0}, /* obsolete, ignored */
 		{"foreground", 0, &opt.foreground}, {"verbose", 0, &opt.verbose},
 		{"stop", 0, &opt.stop},           {"version", 0, &opt.version},
+		{"prespawn", 0, &opt.prespawn},
 	};
 	for (int i = 1; i < argc; i++) {
 		char *a = argv[i];
@@ -272,10 +275,86 @@ static int spawn_helper(int fd, pid_t *pid) {
 	return e;
 }
 
+/* ---- -prespawn: one warm standby helper ----
+ *
+ * The spare helper sits on one end of a socketpair; its Windows process is
+ * already running, so a client only pays for a local hand-off instead of the
+ * ~40 ms WSL interop process start. On connect, a forked relay process copies
+ * bytes between the client and the spare (the accept loop itself never
+ * blocks on a client), and the next spare is started immediately.
+ */
+static int spare_fd = -1;
+static struct timespec spare_born, respawn_at;
+static long respawn_ms; /* backoff for helpers that die right after start */
+
+static long ms_since(const struct timespec *t) {
+	struct timespec n;
+	clock_gettime(CLOCK_MONOTONIC, &n);
+	return (n.tv_sec - t->tv_sec) * 1000 + (n.tv_nsec - t->tv_nsec) / 1000000;
+}
+
+static void schedule_respawn(void) {
+	respawn_ms = respawn_ms ? (respawn_ms * 2 > 60000 ? 60000 : respawn_ms * 2) : 100;
+	clock_gettime(CLOCK_MONOTONIC, &respawn_at);
+	respawn_at.tv_sec += respawn_ms / 1000;
+	respawn_at.tv_nsec += (respawn_ms % 1000) * 1000000;
+	if (respawn_at.tv_nsec >= 1000000000) respawn_at.tv_sec++, respawn_at.tv_nsec -= 1000000000;
+	logf_("standby helper unavailable; retrying in %ld ms", respawn_ms);
+}
+
+static void make_spare(void) {
+	int sv[2];
+	pid_t pid;
+	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) < 0) { schedule_respawn(); return; }
+	int e = spawn_helper(sv[1], &pid);
+	close(sv[1]);
+	if (e) { close(sv[0]); schedule_respawn(); return; }
+	spare_fd = sv[0];
+	clock_gettime(CLOCK_MONOTONIC, &spare_born);
+	logf_("standby helper started (pid %d)", (int)pid);
+}
+
+static int write_all(int fd, const char *p, ssize_t n) {
+	while (n > 0) {
+		ssize_t w = write(fd, p, n);
+		if (w < 0 && errno == EINTR) continue;
+		if (w <= 0) return -1;
+		p += w, n -= w;
+	}
+	return 0;
+}
+
+/* runs in a forked child: client <-> standby helper until the helper is done */
+static _Noreturn void relay(int client, int h) {
+	static char buf[16384];
+	struct pollfd p[2] = {{client, POLLIN, 0}, {h, POLLIN, 0}};
+	for (;;) {
+		if (poll(p, 2, -1) < 0) {
+			if (errno == EINTR) continue;
+			_exit(1);
+		}
+		for (int i = 0; i < 2; i++) {
+			if (!p[i].revents) continue;
+			ssize_t n = read(p[i].fd, buf, sizeof buf);
+			if (n < 0 && errno == EINTR) continue;
+			if (n <= 0) {
+				/* helper finished: done. client half-closed: tell the helper,
+				 * which answers what it already has and then exits. */
+				if (i == 1) _exit(0);
+				shutdown(h, SHUT_WR);
+				p[0].fd = -1;
+				continue;
+			}
+			if (write_all(i ? client : h, buf, n) < 0) _exit(0);
+		}
+	}
+}
+
 static void serve(int lfd, const char *helper) {
 	/* Signals are blocked except while sleeping in ppoll(), so a SIGTERM can
-	 * never slip in between the quit check and the wait. No timeout: the
-	 * process sleeps until a client connects or a signal arrives. */
+	 * never slip in between the quit check and the wait. No timeout (except
+	 * a pending standby respawn): the process sleeps until a client connects
+	 * or a signal arrives. */
 	sigset_t block, waitmask;
 	sigemptyset(&block);
 	sigaddset(&block, SIGTERM);
@@ -296,15 +375,36 @@ static void serve(int lfd, const char *helper) {
 	spawn_argv[0] = (char *)helper;
 	spawn_argv[1] = (char *)opt.pipename;
 	int throttle = 0;
+	/* with -prespawn each connection is a relay process + a helper process */
+	int max_children = opt.prespawn ? 2 * MAX_CHILDREN + 1 : MAX_CHILDREN;
+
+	if (opt.prespawn) make_spare();
 
 	while (!quit) {
 		/* at the connection limit (or out of fds) only wait for children to exit */
-		int lim = nchild >= MAX_CHILDREN || throttle;
-		struct pollfd p = {lfd, POLLIN, 0};
-		if (ppoll(&p, lim ? 0 : 1, NULL, &waitmask) < 0 && errno != EINTR) die("ppoll: %s", strerror(errno));
+		int lim = nchild >= max_children || throttle;
+		struct pollfd p[2] = {{lim ? -1 : lfd, POLLIN, 0}, {spare_fd, POLLIN, 0}};
+		struct timespec to, *top = NULL;
+		if (opt.prespawn && spare_fd < 0) { /* respawn pending */
+			long ms = -ms_since(&respawn_at);
+			if (ms < 0) ms = 0;
+			to.tv_sec = ms / 1000, to.tv_nsec = (ms % 1000) * 1000000, top = &to;
+		}
+		if (ppoll(p, 2, top, &waitmask) < 0 && errno != EINTR) die("ppoll: %s", strerror(errno));
 		if (quit) break;
-		if (lim) { throttle = 0; continue; }
-		if (!(p.revents & POLLIN)) continue;
+		throttle = 0;
+
+		if (spare_fd >= 0 && p[1].revents) {
+			/* an idle helper never writes first: readable/HUP means it exited */
+			long age = ms_since(&spare_born);
+			close(spare_fd);
+			spare_fd = -1;
+			if (age < 2000) schedule_respawn();
+			else respawn_ms = 0, make_spare();
+		} else if (opt.prespawn && spare_fd < 0 && ms_since(&respawn_at) >= 0) {
+			make_spare();
+		}
+		if (!(p[0].revents & POLLIN)) continue;
 
 		int c = accept4(lfd, NULL, NULL, SOCK_CLOEXEC); /* lfd is non-blocking */
 		if (c < 0) {
@@ -331,6 +431,31 @@ static void serve(int lfd, const char *helper) {
 		}
 
 		pid_t pid;
+		if (spare_fd >= 0) {
+			pid = fork();
+			if (pid == 0) {
+				struct sigaction sa = {0};
+				sa.sa_handler = SIG_DFL;
+				sigaction(SIGTERM, &sa, NULL);
+				sigaction(SIGINT, &sa, NULL);
+				sigaction(SIGHUP, &sa, NULL);
+				sigaction(SIGCHLD, &sa, NULL);
+				sigprocmask(SIG_SETMASK, &none, NULL);
+				close(lfd);
+				relay(c, spare_fd);
+			}
+			if (pid > 0) {
+				nchild++;
+				close(spare_fd);
+				spare_fd = -1;
+				close(c);
+				respawn_ms = 0;
+				logf_("ssh: connected (standby helper, relay pid %d)", (int)pid);
+				make_spare();
+				continue;
+			}
+			logf_("fork: %s; starting a helper directly", strerror(errno));
+		}
 		if (spawn_helper(c, &pid) == 0) logf_("ssh: connected (helper pid %d, %d active)", (int)pid, (int)nchild);
 		close(c);
 	}
