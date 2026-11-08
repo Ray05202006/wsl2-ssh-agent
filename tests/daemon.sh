@@ -8,7 +8,7 @@
 set -u
 cd "$(dirname "$0")/.."
 BIN=$(realpath "${1:-./wsl2-ssh-agent}")
-grep -qa __asan_init "$BIN" && SANITIZED=1 || SANITIZED=0
+{ grep -qa __asan_init "$BIN" || [ -n "${VALGRIND:-}" ]; } && SANITIZED=1 || SANITIZED=0  # instrumented: skip the RSS check
 T=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/wsa-dtest.XXXXXX")
 SOCK=$T/s.sock
 mkdir -p build && cc -O2 -o build/sockcat tests/sockcat.c || exit 1
@@ -51,7 +51,7 @@ sleep 0.3
 [ -z "$(cat /proc/$P/task/*/children)" ] && ok "all helpers reaped after 300 connections" || ng "children left"
 [ "$(ls /proc/$P/fd | wc -l)" = "$fd0" ] && ok "no fd leak" || ng "fd leak"
 rss1=$(awk '/^VmRSS/{print $2}' /proc/$P/status)
-if [ $SANITIZED = 1 ]; then ok "RSS growth check skipped (sanitizer build: allocator bookkeeping grows; LSan checks leaks)"
+if [ $SANITIZED = 1 ]; then ok "RSS growth check skipped (instrumented build: allocator bookkeeping grows; the tool checks leaks)"
 else [ $((rss1-rss0)) -le 64 ] && ok "no RSS growth ($rss0 -> $rss1 kB)" || ng "rss" "$rss0 -> $rss1"; fi
 [ "$(ls /proc/$P/task | wc -l)" = 1 ] && ok "single thread" || ng "threads"
 c0=$(awk '{print $14+$15}' /proc/$P/stat); v0=$(awk '/^voluntary/{print $2}' /proc/$P/status); sleep 3
@@ -65,7 +65,8 @@ o=$("$BIN" -socket "$SOCK" -format fish); [ "$o" = "set -x SSH_AUTH_SOCK $SOCK" 
 [ "$P2" != "$P" ] && [ "$r" = ok ] && ok "stale socket replaced" || ng "stale"
 kill -TERM "$P2"; sleep 0.2; [ ! -e "$SOCK" ] && ok "SIGTERM removes socket" || ng "SIGTERM"
 
-"$BIN" "${A[@]}" -foreground & FP=$!; sleep 0.2
+: > "$T/log"; "$BIN" "${A[@]}" -foreground & FP=$!
+for i in $(seq 200); do grep -q "start listening" "$T/log" && break; sleep 0.05; done  # slow under valgrind
 r=$(printf fg | "$SC" "$SOCK"); kill -INT $FP; wait $FP; rc=$?
 [ "$r" = fg ] && [ $rc = 0 ] && [ ! -e "$SOCK" ] && ok "foreground mode + SIGINT" || ng "foreground" "$r rc=$rc"
 

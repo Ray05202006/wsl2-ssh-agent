@@ -71,6 +71,9 @@ sanitize: build/san/wsl2-ssh-agent
 fuzz:
 	tests/fuzz/run.sh $(or $(N),20000)
 
+valgrind: $(HELPER_EXE)
+	HELPER_EXE=$(HELPER_EXE) tests/valgrind.sh $(or $(N),300)
+
 analyze:
 	$(CC) -fanalyzer -O1 $(WARN) -Werror -DHELPER_EXE='"$(abspath $(HELPER_EXE))"' -c -o /dev/null src/wsl2-ssh-agent.c
 
@@ -80,4 +83,4 @@ clean-linux:
 clean: clean-linux
 	rm -rf build
 
-.PHONY: all test test-daemon sanitize fuzz analyze install clean clean-linux
+.PHONY: all test test-daemon sanitize fuzz valgrind analyze install clean clean-linux
