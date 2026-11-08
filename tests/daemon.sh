@@ -15,7 +15,9 @@ mkdir -p build && cc -O2 -o build/sockcat tests/sockcat.c || exit 1
 SC=$PWD/build/sockcat
 # standbys get --ready and must answer with one 0xff byte once started
 printf '#!/bin/sh\n[ "$1" = --ready ] && { printf "\\377"; shift; }\necho "helper args: $*" >&2\nexec cat\n' > "$T/echo-helper"; chmod 700 "$T/echo-helper"
-A=(-socket "$SOCK" -helper "$T/echo-helper" -log "$T/log")
+# -prespawn is the default; A is the per-connection path, A0 the default
+A0=(-socket "$SOCK" -helper "$T/echo-helper" -log "$T/log")
+A=("${A0[@]}" -prespawn=false)
 pass=0 fail=0
 gone() { [ ! -e /proc/$1 ] || case "$(awk '{print $3}' /proc/$1/stat 2>/dev/null)" in Z|X|"") true;; *) false;; esac; }  # exited: zombie or being reaped
 ok() { echo "ok   - $1"; pass=$((pass+1)); }
@@ -70,8 +72,8 @@ for i in $(seq 200); do grep -q "start listening" "$T/log" && break; sleep 0.05;
 r=$(printf fg | "$SC" "$SOCK"); kill -INT $FP; wait $FP; rc=$?
 [ "$r" = fg ] && [ $rc = 0 ] && [ ! -e "$SOCK" ] && ok "foreground mode + SIGINT" || ng "foreground" "$r rc=$rc"
 
-# ---- -prespawn (warm standby) ----
-"$BIN" "${A[@]}" -prespawn >/dev/null; P=$(dpid); sleep 0.2
+# ---- -prespawn (warm standby, the default) ----
+"$BIN" "${A0[@]}" >/dev/null; P=$(dpid); sleep 0.2
 kids() { cat /proc/$P/task/*/children | wc -w; }
 [ "$(kids)" = 1 ] && ok "prespawn: one standby helper while idle" || ng "prespawn standby" "$(kids)"
 r=$(printf 'warm' | "$SC" "$SOCK"); [ "$r" = warm ] && ok "prespawn: client served by standby (half-close relayed)" || ng "prespawn echo" "$r"
@@ -103,7 +105,7 @@ if [ -e "$T/die-after-ready" ]; then head -c 1 >/dev/null; echo got >> "$T/serve
 exec cat
 EOS
 chmod 700 "$T/flaky-helper"
-"$BIN" -socket "$SOCK" -helper "$T/flaky-helper" -log "$T/log3" -prespawn >/dev/null; P=$(dpid); sleep 0.3
+"$BIN" -socket "$SOCK" -helper "$T/flaky-helper" -log "$T/log3" >/dev/null; P=$(dpid); sleep 0.3
 touch "$T/fail-once"
 printf a | "$SC" "$SOCK" >/dev/null          # takes the ready standby; the next one will fail
 r=$(printf 'replayed' | "$SC" "$SOCK" 5000)  # gets the standby that is still "starting"
@@ -117,7 +119,7 @@ rm -f "$T/die-after-ready"
 
 # a helper that dies immediately must not make the daemon spin
 printf '#!/bin/sh\nexit 1\n' > "$T/dead-helper"; chmod 700 "$T/dead-helper"
-"$BIN" -socket "$SOCK" -helper "$T/dead-helper" -log "$T/log2" -prespawn >/dev/null; P=$(dpid); sleep 3
+"$BIN" -socket "$SOCK" -helper "$T/dead-helper" -log "$T/log2" >/dev/null; P=$(dpid); sleep 3
 v=$(awk '/^voluntary/{print $2}' /proc/$P/status)
 [ "$v" -lt 40 ] && ok "prespawn: dying helper backs off (ctxsw=$v in 3 s)" || ng "respawn spin" "ctxsw=$v"
 printf x | "$SC" "$SOCK" 3000 >/dev/null; [ $? != 3 ] && kill -0 "$P" && ok "prespawn: no standby -> direct path, no hang" || ng "prespawn fallback"

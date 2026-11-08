@@ -51,7 +51,7 @@ extern const unsigned long long helper_exe_size;
 static struct {
 	const char *socket, *helper, *pipename, *log, *format;
 	int foreground, verbose, stop, version, prespawn;
-} opt = {.pipename = "openssh-ssh-agent", .format = "auto"};
+} opt = {.pipename = "openssh-ssh-agent", .format = "auto", .prespawn = 1};
 
 static int log_fd = -1;     /* -1 = logging disabled */
 static int child_err = -1;  /* stderr for helpers */
@@ -90,8 +90,9 @@ static void usage(FILE *f) {
 	      "  -socket PATH     UNIX domain socket to listen on (default ~/.ssh/wsl2-ssh-agent.sock)\n"
 	      "  -pipename NAME   Windows named pipe to connect to (default openssh-ssh-agent)\n"
 	      "  -helper PATH     use this wsl2-ssh-agent-helper.exe instead of the embedded one\n"
-	      "  -prespawn        keep one helper started ahead of time (lower connection\n"
-	      "                   latency, ~1 MB resident on Windows; see DESIGN.md)\n"
+	      "  -prespawn        keep one helper started ahead of time (default on: lower\n"
+	      "                   connection latency, ~1 MB resident on Windows);\n"
+	      "                   -prespawn=false starts one per connection instead\n"
 	      "  -foreground      run in foreground mode\n"
 	      "  -verbose         verbose mode\n"
 	      "  -log FILE        append the log to FILE\n"

@@ -11,8 +11,8 @@
  *
  * One process per client connection (started on connect, or ahead of time
  * with the daemon's -prespawn): the process lives exactly as long as
- * the ssh/ssh-add connection, so (without -prespawn) nothing stays resident on Windows when no
- * client is connected, and every client gets its own pipe connection (so
+ * the ssh/ssh-add connection, so (with -prespawn=false) nothing stays resident
+ * on Windows when no client is connected, and every client gets its own pipe connection (so
  * per-connection agent state such as session-bind is never shared).
  *
  * Built without the C runtime (kernel32 only); see windows/msvc.sh.
