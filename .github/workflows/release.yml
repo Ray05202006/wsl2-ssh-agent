@@ -1,4 +1,4 @@
-name: goreleaser
+name: release
 
 on:
   push:
@@ -7,25 +7,24 @@ on:
 
 permissions:
   contents: write
-  # packages: write
-  # issues: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: git fetch --force --tags
-      - uses: actions/setup-go@v3
-        with:
-          go-version: '>=1.20.0'
-          cache: true
-      - uses: goreleaser/goreleaser-action@v4
-        with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean
+      - run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-aarch64-linux-gnu
+      - name: Build x86-64
+        run: make WINCC=x86_64-w64-mingw32-gcc VERSION=${GITHUB_REF_NAME}
+      - name: Build arm64 (Linux side; the x64 helper runs under Windows' x64 emulation)
+        run: |
+          cp wsl2-ssh-agent dist-amd64
+          make clean-linux CC=aarch64-linux-gnu-gcc WINCC=x86_64-w64-mingw32-gcc VERSION=${GITHUB_REF_NAME}
+          make CC=aarch64-linux-gnu-gcc WINCC=x86_64-w64-mingw32-gcc VERSION=${GITHUB_REF_NAME}
+          mv wsl2-ssh-agent wsl2-ssh-agent-arm64 && mv dist-amd64 wsl2-ssh-agent
+          sha256sum wsl2-ssh-agent wsl2-ssh-agent-arm64 > checksums.txt
+      - run: gh release create "$GITHUB_REF_NAME" --generate-notes wsl2-ssh-agent wsl2-ssh-agent-arm64 checksums.txt
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

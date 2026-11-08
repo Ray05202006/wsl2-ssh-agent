@@ -10,14 +10,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.20"
-      - name: Get Dependencies
-        run: go get -v
+      - uses: actions/checkout@v4
+      - name: Install mingw-w64 (Windows helper cross compiler)
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
       - name: Build
-        run: go build -v ./...
-      - name: Test
-        run: go test -v ./...
+        run: make WINCC=x86_64-w64-mingw32-gcc
+      - name: Sizes
+        run: ls -l wsl2-ssh-agent build/wsl2-ssh-agent-helper.exe
+      # The full suite (tests/run.sh) needs WSL2 + the Windows agent; CI runs
+      # the daemon-only suite with a stand-in helper.
+      - name: Daemon tests
+        run: tests/daemon.sh ./wsl2-ssh-agent
+      - name: Daemon tests under ASan + UBSan
+        run: make sanitize WINCC=x86_64-w64-mingw32-gcc
+      - name: Helper framing fuzz (ASan + UBSan, Win32 shim)
+        run: make fuzz N=5000
+      - name: Static analysis (gcc -fanalyzer)
+        run: make analyze WINCC=x86_64-w64-mingw32-gcc
