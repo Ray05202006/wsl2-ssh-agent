@@ -66,7 +66,7 @@ build/san/wsl2-ssh-agent: src/wsl2-ssh-agent.c $(HELPER_EXE)
 
 sanitize: build/san/wsl2-ssh-agent
 	ASAN_OPTIONS=exitcode=99 tests/daemon.sh build/san/wsl2-ssh-agent
-	@if [ -n "$$WSL_DISTRO_NAME" ]; then tests/run.sh build/san/wsl2-ssh-agent && PRESPAWN=1 tests/run.sh build/san/wsl2-ssh-agent; fi
+	@if [ -n "$$WSL_DISTRO_NAME" ]; then tests/run.sh build/san/wsl2-ssh-agent && PRESPAWN=0 tests/run.sh build/san/wsl2-ssh-agent; fi
 
 fuzz:
 	tests/fuzz/run.sh $(or $(N),20000)

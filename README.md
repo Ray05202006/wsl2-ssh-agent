@@ -6,9 +6,11 @@ This tool lets WSL2 use the ssh-agent service on the Windows host
 This is a low-resource re-implementation of
 [mame/wsl2-ssh-agent](https://github.com/mame/wsl2-ssh-agent) by Yusuke Endoh
 (MIT license, kept in [LICENSE](LICENSE)): a small C daemon in WSL2 plus a
-~6 KB native Windows helper that is started only while a client is
-connected. Nothing stays resident on the Windows side, and the daemon makes no
-wakeups while idle. Command-line flags and shell integration are compatible
+~6 KB native Windows helper. By default one helper is kept started ahead of
+time (`-prespawn`, about 1 MB resident on the Windows side) so connections
+start fast; with `-prespawn=false` helpers start only while a client is
+connected and nothing stays resident on Windows. The daemon makes no wakeups
+while idle either way. Command-line flags and shell integration are compatible
 with the original. See [DESIGN.md](DESIGN.md) for the analysis, the
 alternatives that were measured, and the benchmarks.
 
@@ -116,8 +118,9 @@ You should now be able to run `ssh your-server` and connect using the SSH keys m
 -socket PATH     UNIX domain socket to listen on (default ~/.ssh/wsl2-ssh-agent.sock)
 -pipename NAME   Windows named pipe to connect to (default openssh-ssh-agent)
 -helper PATH     use this wsl2-ssh-agent-helper.exe instead of the embedded one
--prespawn        keep one helper started ahead of time (lower connection
-                 latency, ~1 MB resident on Windows; see below)
+-prespawn        keep one helper started ahead of time (default on: lower
+                 connection latency, ~1 MB resident on Windows; see below).
+                 Use -prespawn=false to start one helper per connection
 -foreground      run in foreground mode
 -verbose         verbose mode
 -log FILE        append the log to FILE
@@ -191,20 +194,22 @@ Each client gets its own pipe connection. Per-connection agent state therefore
 behaves exactly as it does on Windows, concurrent clients never wait for each
 other, and a restarted Windows agent is picked up by the next connection.
 
-The trade-off is about 40 ms of WSL interop process start-up per *connection*,
-not per request. See DESIGN.md for the numbers.
+Without `-prespawn` (`-prespawn=false`) the cost is about 40 ms of WSL interop
+process start-up per *connection*, not per request. See DESIGN.md for the
+numbers.
 
-### `-prespawn`: warm standby (opt-in)
+### `-prespawn`: warm standby (default)
 
-With `-prespawn`, the daemon keeps one helper already started, waiting on a
+By default, the daemon keeps one helper already started, waiting on a
 socketpair. A new client is handed to that standby: a small forked relay
 copies bytes between the client and the helper, and the next standby starts
 right away. Connection set-up then skips the interop start, at the cost of one
 resident helper process (a few hundred KB private on each side; numbers in
 DESIGN.md §9). The standby doesn't open the agent's pipe until its first
 request, so an agent restart while it waits does no harm. If the helper keeps
-failing to start, the daemon backs off and falls back to the default
-per-connection path.
+failing to start, the daemon backs off and falls back to the per-connection
+path. Pass `-prespawn=false` (for example in the rc-file line or the systemd
+unit's `ExecStart`) to start no standby and keep nothing resident on Windows.
 
 ## Note on Windows OpenSSH Compatibility
 

@@ -165,9 +165,10 @@ Against the stated priorities:
 login for about 0.6 MB of resident private memory (≈1 MB commit), one
 permanent Windows process, and noticeably more code. Under the stated
 priority order (RAM first, latency fourth), plus the instruction not to keep
-a persistent helper unless it pays for itself, D is the default. The
-warm-standby variant (C) is available as the opt-in `-prespawn` flag; §9 has
-its implementation and measurements.
+a persistent helper unless it pays for itself, D was originally the default.
+That decision has since been reversed: the warm-standby variant (C) is now the
+default (`-prespawn`), and D remains available as `-prespawn=false`; §9 has
+the implementation and measurements.
 
 ## 5. Implementation notes
 
@@ -383,7 +384,7 @@ Go's sysmon parks when idle.
 * The interop launch cost depends on the WSL version. Faster interop in
   future WSL releases would directly shrink the one remaining regression.
 
-## 9. `-prespawn`: warm standby (opt-in)
+## 9. `-prespawn`: warm standby (default)
 
 ### Design
 
@@ -438,7 +439,7 @@ Same binary for both modes, same machine and session (`bench/results/c.txt`,
 interleaved, default/prespawn × 3 runs × 100 logins, plus one run of the
 original for reference.
 
-| Metric | Default | `-prespawn` | Original (reference) |
+| Metric | Per-connection (`-prespawn=false`) | `-prespawn` (default) | Original (reference) |
 |---|---|---|---|
 | **Real `ssh` login p50** (mean of 3 runs) | 119.3 ms | **96.0 ms** | 107.1 ms |
 | Real `ssh` login p95 | 127.3 ms | **101.4 ms** | 112.2 ms |
@@ -480,10 +481,10 @@ get back to 30,928 B, but it maps .rodata, including the embedded helper
 bytes, executable together with the code, so it is not used. The latency and
 memory numbers are unaffected: the daemon reads one extra byte per standby.
 
-**Recommendation:** keep per-connection as the default (lowest footprint,
-matching the stated priorities), and use `-prespawn` if you open many short
-SSH connections interactively (git over SSH, `ssh` in loops) and the
-~0.6 MB is irrelevant to you.
+**Decision:** `-prespawn` is the default, trading ~0.6 MB of resident memory
+for ~25 ms off every connection (git over SSH, `ssh` in loops). Use
+`-prespawn=false` for the per-connection mode, which has the lowest footprint
+and keeps nothing resident on Windows.
 
 ### Tests
 
@@ -495,8 +496,10 @@ standby exits with the daemon; a standby whose launch fails before the
 ready byte is retried and the client's request replayed; no replay once the
 helper was ready; a helper that dies immediately backs off (16 context
 switches in 3 s, no spin); and the fallback to the direct path with no hang.
-`PRESPAWN=1 tests/run.sh` runs the whole 37-test end-to-end suite with
-`-prespawn` and reports any launch failures seen in the daemon logs.
+`tests/run.sh` runs the whole 37-test end-to-end suite in the default
+`-prespawn` mode (`PRESPAWN=0` for the per-connection mode) and reports any
+launch failures seen in the daemon logs. (Before the default changed, the
+prespawn runs below were made with `PRESPAWN=1`.)
 
 The tests now find the daemon's PID with `ss -xlp` (the only process holding
 the listening socket) instead of `pgrep -f`, because relay processes are
@@ -514,7 +517,7 @@ Checked after a code review of both C files:
 | Check | Daemon (`src/`) | Helper (`windows/`) |
 |---|---|---|
 | Review findings fixed | `SO_PEERCRED` failure no longer logs an uninitialised uid; `stat()` of the new socket is checked; paths built from `HOME`/`XDG_RUNTIME_DIR` now fail instead of being silently truncated (`pathf`); signal handlers are installed before `listen()` (previously a SIGTERM or `-stop` right after the start snippet was printed could kill the daemon with the default action and leave a stale socket) | — |
-| ASan + UBSan (`make sanitize`) | `tests/daemon.sh` 36/36, `tests/run.sh` 37/37, `PRESPAWN=1 tests/run.sh` 37/37; **no sanitizer reports**; LeakSanitizer clean at every daemon exit | — |
+| ASan + UBSan (`make sanitize`) | `tests/daemon.sh` 36/36, `tests/run.sh` 37/37, `PRESPAWN=0 tests/run.sh` 37/37; **no sanitizer reports**; LeakSanitizer clean at every daemon exit | — |
 | Randomized framing tests (`make fuzz`) | — | helper.c built on Linux against a Win32 shim (`tests/fuzz/`), ASan + UBSan, **40,002 runs, 0 problems**. Echo agent: output must equal the exactly expected frames (every 4th seed runs as a `--ready` standby and must emit `0xff` first). Hostile agent: random and malformed replies. Missing and permanently busy pipe must give up, on a virtual clock. |
 | Harness sensitivity | — | Planted bugs are caught: length check `> MAX_MSG + 16` gives 43 overflow reports, and `> MAX_MSG + 1` (off-by-one) gives 12, in 1,200 runs |
 | Static analysis (`make analyze`) | `gcc -fanalyzer`, **0 warnings** (`-Werror`) | **unverified**: gcc 16.2.1's analyzer hits an internal compiler error on helper.c (at -O0 and -O1); MSVC `/analyze` not run |

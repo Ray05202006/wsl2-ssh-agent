@@ -2,7 +2,7 @@
 # Functional and regression tests for wsl2-ssh-agent.
 #
 #   tests/run.sh [path/to/wsl2-ssh-agent]
-#   PRESPAWN=1 tests/run.sh ...     same suite with -prespawn on every daemon
+#   PRESPAWN=0 tests/run.sh ...     same suite with -prespawn=false (per-connection helpers)
 #
 # Needs: WSL2 with interop, the Windows "OpenSSH Authentication Agent" service
 # running with at least one key loaded, ssh-add/ssh-keygen in WSL, a C compiler.
@@ -14,10 +14,10 @@ cd "$(dirname "$0")/.."
 BIN=$(realpath "${1:-./wsl2-ssh-agent}")
 grep -qa __asan_init "$BIN" && SANITIZED=1 || SANITIZED=0
 T=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/wsa-test.XXXXXX")
-IDLE_CHILDREN=0
-if [ "${PRESPAWN:-0}" = 1 ]; then   # wrapper appends -prespawn; exec keeps pids/cmdlines intact
-	printf '#!/bin/sh\nexec "%s" "$@" -prespawn\n' "$BIN" > "$T/agent"; chmod 700 "$T/agent"
-	BIN=$T/agent IDLE_CHILDREN=1; echo "# mode: -prespawn"
+IDLE_CHILDREN=1   # the default mode keeps one standby helper
+if [ "${PRESPAWN:-1}" = 0 ]; then   # wrapper appends -prespawn=false; exec keeps pids/cmdlines intact
+	printf '#!/bin/sh\nexec "%s" "$@" -prespawn=false\n' "$BIN" > "$T/agent"; chmod 700 "$T/agent"
+	BIN=$T/agent IDLE_CHILDREN=0; echo "# mode: -prespawn=false"
 fi
 SOCK=$T/agent.sock
 mkdir -p build
