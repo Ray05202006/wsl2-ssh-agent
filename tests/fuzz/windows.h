@@ -62,6 +62,7 @@ static void shim_init(void) {
 	if (shim_mode == 1) {
 		FILE *f = fopen(getenv("FAKE_REPLY"), "rb");
 		shim_rep = malloc(1 << 20);
+		if (!shim_rep) abort();
 		shim_rep_len = f ? fread(shim_rep, 1, 1 << 20, f) : 0;
 		if (f) fclose(f);
 	}
@@ -76,7 +77,7 @@ static void Sleep(DWORD ms) { shim_ticks += ms; }
 static BOOL WaitNamedPipeW(LPCWSTR n, DWORD t) { (void)n; shim_ticks += t / 8 + 1; return TRUE; }
 
 static HANDLE CreateFileW(LPCWSTR n, DWORD a, DWORD s, void *sa, DWORD c, DWORD f, HANDLE t) {
-	(void)n, (void)a, (void)s, (void)sa, (void)c, (void)f, (void)t;
+	(void)n; (void)a; (void)s; (void)sa; (void)c; (void)f; (void)t;
 	shim_init();
 	if (shim_mode == 2) { shim_err = ERROR_FILE_NOT_FOUND; return INVALID_HANDLE_VALUE; }
 	if (shim_mode == 3) { shim_err = ERROR_PIPE_BUSY; return INVALID_HANDLE_VALUE; }
@@ -121,21 +122,21 @@ static BOOL ReadFile(HANDLE h, void *p, DWORD n, LPDWORD r, void *o) {
 
 /* version check */
 static DWORD SearchPathW(LPCWSTR a, LPCWSTR b, LPCWSTR c, DWORD n, WCHAR *out, WCHAR **f) {
-	(void)a, (void)b, (void)c, (void)f;
+	(void)a; (void)b; (void)c; (void)f;
 	wcsncpy(out, L"C:\\ssh-agent.exe", n);
 	return 16;
 }
 static DWORD fake_size(LPCWSTR p, LPDWORD d) { (void)p; *d = 0; return 64; }
-static BOOL fake_info(LPCWSTR p, DWORD h, DWORD n, LPVOID d) { (void)p, (void)h; memset(d, 0, n); return TRUE; }
+static BOOL fake_info(LPCWSTR p, DWORD h, DWORD n, LPVOID d) { (void)p; (void)h; memset(d, 0, n); return TRUE; }
 static BOOL fake_query(LPCVOID d, LPCWSTR s, LPVOID *out, PUINT len) {
 	static VS_FIXEDFILEINFO fi;
-	(void)d, (void)s;
+	(void)d; (void)s;
 	fi.dwFileVersionMS = getenv("FAKE_OLD_AGENT") ? (8u << 16 | 1) : (9u << 16 | 5);
 	*out = &fi;
 	*len = sizeof fi;
 	return TRUE;
 }
-static HMODULE LoadLibraryW(LPCWSTR n) { (void)n; return (HMODULE)1; }
+static HMODULE LoadLibraryW(LPCWSTR n) { (void)n; return (HMODULE)(intptr_t)1; } /* cppcheck-suppress intToPointerCast */
 static BOOL FreeLibrary(HMODULE m) { (void)m; return TRUE; }
 static FARPROC GetProcAddress(HMODULE m, const char *n) {
 	(void)m;
@@ -144,5 +145,5 @@ static FARPROC GetProcAddress(HMODULE m, const char *n) {
 	                                             : (FARPROC)fake_query;
 }
 static HANDLE GetProcessHeap(void) { return NULL; }
-static void *HeapAlloc(HANDLE h, DWORD f, size_t n) { (void)h, (void)f; return malloc(n); }
-static BOOL HeapFree(HANDLE h, DWORD f, void *p) { (void)h, (void)f; free(p); return TRUE; }
+static void *HeapAlloc(HANDLE h, DWORD f, size_t n) { (void)h; (void)f; return malloc(n); }
+static BOOL HeapFree(HANDLE h, DWORD f, void *p) { (void)h; (void)f; free(p); return TRUE; }

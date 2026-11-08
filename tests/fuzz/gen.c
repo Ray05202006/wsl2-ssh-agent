@@ -24,8 +24,9 @@ int main(int argc, char **argv) {
 	s = strtoull(argv[1], 0, 10) * 2654435761u + 1;
 	int old = argv[5][0] == '1';
 	FILE *in = fopen(argv[2], "wb"), *ex = fopen(argv[3], "wb"), *rp = fopen(argv[4], "wb");
-	int frames = 1 + rnd() % 6, stop = 0;
-	for (int i = 0; i < frames && !stop; i++) {
+	if (!in || !ex || !rp) return 1;
+	int frames = 1 + rnd() % 6;
+	for (int i = 0; i < frames; i++) {
 		uint32_t n = pick_len();
 		int type = rnd() % 4 == 0 ? 27 : (int)(rnd() % 256);
 		int trunc = rnd() % 10 == 0;
@@ -39,10 +40,11 @@ int main(int argc, char **argv) {
 		}
 		uint32_t body = trunc ? rnd() % n : n;
 		unsigned char *b = malloc(n);
+		if (!b) return 1;
 		for (uint32_t k = 0; k < n; k++) b[k] = (unsigned char)rnd();
 		b[0] = (unsigned char)type;
 		fwrite(b, 1, body, in);
-		if (trunc) { stop = 1; free(b); break; }
+		if (trunc) { free(b); break; }
 		if (type == 27 && old) { be32(ex, 1); fputc(5, ex); }
 		else { be32(ex, n); fwrite(b, 1, n, ex); }
 		free(b);

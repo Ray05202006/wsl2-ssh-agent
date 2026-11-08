@@ -144,11 +144,13 @@ int main(int argc, char **argv) {
 	double t0 = now_us();
 	for (int i = 0; i < conc; i++) {
 		w[i].lat = calloc(n_req, sizeof(double));
+		if (!w[i].lat) return 1;
 		w[i].fails = 0;
 		pthread_create(&th[i], NULL, worker, &w[i]);
 	}
 	int total = n_req * conc, fails = 0;
 	double *all = malloc(total * sizeof(double));
+	if (!all) return 1;
 	for (int i = 0; i < conc; i++) {
 		pthread_join(th[i], NULL);
 		memcpy(all + i * n_req, w[i].lat, n_req * sizeof(double));
@@ -157,6 +159,7 @@ int main(int argc, char **argv) {
 	double wall = now_us() - t0;
 	if (argc > 5) {
 		FILE *f = fopen(argv[5], "a");
+		if (!f) { perror(argv[5]); return 1; }
 		for (int i = 0; i < total; i++) fprintf(f, "%.1f\n", all[i]);
 		fclose(f);
 	}

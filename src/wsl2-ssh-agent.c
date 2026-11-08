@@ -38,9 +38,13 @@ extern char **environ;
 
 /* the Windows helper, embedded at build time (see Makefile) */
 #ifdef HELPER_EXE
+/* the assembler computes the size, so C never subtracts pointers into two
+ * different objects (undefined behaviour even when they are adjacent) */
 __asm__(".section .rodata\n.balign 16\n.globl helper_exe\nhelper_exe:\n.incbin \"" HELPER_EXE "\"\n"
-        ".globl helper_exe_end\nhelper_exe_end:\n.previous\n");
-extern const char helper_exe[], helper_exe_end[];
+        "helper_exe_end:\n.balign 8\n.globl helper_exe_size\nhelper_exe_size:\n.quad helper_exe_end - helper_exe\n"
+        ".previous\n");
+extern const char helper_exe[];
+extern const unsigned long long helper_exe_size;
 #endif
 
 static struct {
@@ -181,7 +185,7 @@ static const char *prepare_helper(void) {
 	pathf(path, sizeof path, "%s/wsl2-ssh-agent-helper.exe", dir);
 
 	/* reuse an identical copy (the normal case), otherwise write + rename atomically */
-	size_t n = (size_t)(helper_exe_end - helper_exe);
+	size_t n = (size_t)helper_exe_size;
 	int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
 	if (fd >= 0) {
 		static char cur[1 << 16];
