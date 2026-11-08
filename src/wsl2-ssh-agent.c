@@ -537,6 +537,20 @@ static void serve(int lfd, const char *helper) {
 	logf_("shutdown");
 }
 
+/* before listen(): once a client (or -stop) can reach us, a SIGTERM must
+ * already mean a clean shutdown that removes the socket */
+static void install_signals(void) {
+	struct sigaction sa = {0};
+	sa.sa_handler = on_signal;
+	sigaction(SIGTERM, &sa, NULL);
+	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGHUP, &sa, NULL);
+	sa.sa_handler = on_child;
+	sa.sa_flags = SA_NOCLDSTOP;
+	sigaction(SIGCHLD, &sa, NULL);
+	signal(SIGPIPE, SIG_IGN);
+}
+
 int main(int argc, char **argv) {
 	static char sockbuf[4096];
 	parse_args(argc, argv);
@@ -607,6 +621,7 @@ int main(int argc, char **argv) {
 		}
 		close(rp[0]);
 		setsid();
+		install_signals();
 		if (listen(lfd, 64) < 0) die("failed to listen on %s: %s", opt.socket, strerror(errno));
 		logf_("start listening on %s", opt.socket);
 		if (write(rp[1], "", 1) != 1) _exit(1);
@@ -616,20 +631,12 @@ int main(int argc, char **argv) {
 		dup2(log_fd >= 0 ? log_fd : nul, 2);
 		if (log_fd == STDOUT_FILENO) log_fd = -1;
 	} else {
+		install_signals();
 		if (listen(lfd, 64) < 0) die("failed to listen on %s: %s", opt.socket, strerror(errno));
 		logf_("start listening on %s", opt.socket);
 	}
 	if (chdir("/") < 0) {}
 
-	struct sigaction sa = {0};
-	sa.sa_handler = on_signal;
-	sigaction(SIGTERM, &sa, NULL);
-	sigaction(SIGINT, &sa, NULL);
-	sigaction(SIGHUP, &sa, NULL);
-	sa.sa_handler = on_child;
-	sa.sa_flags = SA_NOCLDSTOP;
-	sigaction(SIGCHLD, &sa, NULL);
-	signal(SIGPIPE, SIG_IGN);
 
 	serve(lfd, helper);
 
