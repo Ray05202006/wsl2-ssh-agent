@@ -55,10 +55,29 @@ install: wsl2-ssh-agent
 test-daemon: wsl2-ssh-agent
 	tests/daemon.sh ./wsl2-ssh-agent
 
+# memory-safety checks: ASan+UBSan daemon under the daemon test suite (plus the
+# end-to-end suite when run in WSL2), randomized framing tests of the helper,
+# and gcc's static analyzer on the daemon.
+SANFLAGS = -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+
+build/san/wsl2-ssh-agent: src/wsl2-ssh-agent.c $(HELPER_EXE)
+	mkdir -p build/san
+	$(CC) $(SANFLAGS) $(WARN) -DHELPER_EXE='"$(abspath $(HELPER_EXE))"' -o $@ $<
+
+sanitize: build/san/wsl2-ssh-agent
+	ASAN_OPTIONS=exitcode=99 tests/daemon.sh build/san/wsl2-ssh-agent
+	@if [ -n "$$WSL_DISTRO_NAME" ]; then tests/run.sh build/san/wsl2-ssh-agent && PRESPAWN=1 tests/run.sh build/san/wsl2-ssh-agent; fi
+
+fuzz:
+	tests/fuzz/run.sh $(or $(N),20000)
+
+analyze:
+	$(CC) -fanalyzer -O1 $(WARN) -Werror -DHELPER_EXE='"$(abspath $(HELPER_EXE))"' -c -o /dev/null src/wsl2-ssh-agent.c
+
 clean-linux:
 	rm -f wsl2-ssh-agent
 
 clean: clean-linux
 	rm -rf build
 
-.PHONY: all test test-daemon install clean clean-linux
+.PHONY: all test test-daemon sanitize fuzz analyze install clean clean-linux
