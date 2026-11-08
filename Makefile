@@ -1,6 +1,7 @@
 # wsl2-ssh-agent: C daemon (Linux) + native helper (Windows).
 #
 #   make                 build ./wsl2-ssh-agent with the helper embedded
+#   make test            functional tests (needs WSL interop + Windows ssh-agent)
 #   make install         install to $(DESTDIR)$(PREFIX)/bin
 #
 # The Windows helper is built with one of (first found):
@@ -43,10 +44,16 @@ wsl2-ssh-agent: src/wsl2-ssh-agent.c $(HELPER_EXE)
 build/agentbench: bench/agentbench.c | build
 	$(CC) -O2 -pthread -o $@ $<
 
+test: wsl2-ssh-agent build/agentbench
+	tests/run.sh ./wsl2-ssh-agent
+
 install: wsl2-ssh-agent
 	install -Dm755 wsl2-ssh-agent $(DESTDIR)$(PREFIX)/bin/wsl2-ssh-agent
 	install -Dm644 extras/systemd/user/wsl2-ssh-agent.service \
 	  $(DESTDIR)$(PREFIX)/lib/systemd/user/wsl2-ssh-agent.service
+
+test-daemon: wsl2-ssh-agent
+	tests/daemon.sh ./wsl2-ssh-agent
 
 clean-linux:
 	rm -f wsl2-ssh-agent
@@ -54,4 +61,4 @@ clean-linux:
 clean: clean-linux
 	rm -rf build
 
-.PHONY: all install clean clean-linux
+.PHONY: all test test-daemon install clean clean-linux
