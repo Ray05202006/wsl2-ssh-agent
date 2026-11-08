@@ -220,3 +220,11 @@ keeps working.
 The original sent `SSH_AGENT_SUCCESS` here. `FAILURE` is the reply the
 protocol defines for an unsupported extension, and OpenSSH continues normally
 on either reply.
+
+## Acknowledgements
+
+Thanks to Yusuke Endoh ([@mame](https://github.com/mame)) and the contributors
+of [mame/wsl2-ssh-agent](https://github.com/mame/wsl2-ssh-agent). That project
+defined the problem, the command-line interface and the shell integration this
+re-implementation stays compatible with, and it was the baseline for every
+measurement in [DESIGN.md](DESIGN.md).
