@@ -6,7 +6,7 @@ This tool lets WSL2 use the ssh-agent service on the Windows host
 This is a low-resource re-implementation of
 [mame/wsl2-ssh-agent](https://github.com/mame/wsl2-ssh-agent) by Yusuke Endoh
 (MIT license, kept in [LICENSE](LICENSE)): a small C daemon in WSL2 plus a
-~6.5 KB native Windows helper that is started only while a client is
+~6 KB native Windows helper that is started only while a client is
 connected. Nothing stays resident on the Windows side, and the daemon makes no
 wakeups while idle. Command-line flags and shell integration are compatible
 with the original. See [DESIGN.md](DESIGN.md) for the analysis, the
